@@ -1,0 +1,34 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[[source]]
+url = "https://download.pytorch.org/whl/nightly/cpu"
+verify_ssl = true
+name = "downloadpytorch"
+
+[packages]
+torch = {version = "*", index = "downloadpytorch"}
+torchvision = {version = "*", index = "downloadpytorch"}
+torchaudio = {version = "*", index = "downloadpytorch"}
+opacus = "*"
+numpy = "*"
+tqdm = "*"
+jupyter = "*"
+pandas = "*"
+transformers = "*"
+fastapi = "*"
+uvicorn = {extras = ["standard"], version = "*"}
+dynaconf = "*"
+httpx = "*"
+python-multipart = "*"
+
+[dev-packages]
+black = "*"
+
+[requires]
+python_version = "3.10"
+
+[pipenv]
+allow_prereleases = true

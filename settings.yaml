@@ -1,0 +1,21 @@
+# Neural network settings
+embedding_size: 64
+hidden_size: 128
+n_lstm_layers: 1
+bidirectional_lstm: False
+
+# Training settings
+epochs: 100
+learning_rate: 2.0
+sync_epochs: 10
+
+# Privacy engine settings
+secure_mode: False
+delta: 0.00008
+epsilon: 12.0
+max_per_sample_grad_norm: 1.5
+
+# Peer settings
+temp_dir: ./temp
+data_path: ./data/names
+bootstrap_peers: 
