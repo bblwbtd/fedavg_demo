@@ -1,123 +1,158 @@
 import os
-import torch
-import httpx
-
+import time
 from statistics import mean
+from typing import OrderedDict
+
+import httpx
+import torch
+from opacus import PrivacyEngine
 from torch import nn
 from torch.utils.data import DataLoader
-from opacus import PrivacyEngine
-from typing import OrderedDict
-from .model import init_name_classifier_model
+
+from config import settings
 
 
 class Peer:
     def __init__(
-        self,
-        model: nn.Module = init_name_classifier_model(),
-        bootstrap_peers: list[str] = [],
-        sync_epoch=10,
-        max_epoch=100,
+            self,
+            model: nn.Module,
+            criterion,
+            optimizer,
+            train_loader: DataLoader,
+            privacy_engine: PrivacyEngine,
+            device="cpu",
+            bootstrap_peers=None,
+            sync_epoch=10,
+            max_epoch=100,
     ) -> None:
+        if bootstrap_peers is None:
+            bootstrap_peers = []
+        self.criterion = criterion
+        self.optimizer = optimizer
+        self.train_loader = train_loader
+        self.privacy_engine = privacy_engine
+        self.device = device
         self.current_epoch = 0
         self.max_epoch = max_epoch
         self.sync_epoch = sync_epoch
         self.bootstrap_peers = bootstrap_peers
         self.initiated_peers: list[str] = []
         self.model = model
-
-    def sync_state_with_other_peers(self, state: dict):
-        for host in self.bootstrap_peers:
-            httpx.post(f"{host}/sync/{self.current_epoch}", json=state)
+        self.is_training = False
 
     def update_model(self, cache_dir: str):
+        print("Updating model")
         current_state = self.model.state_dict()
-        _, _, files = os.walk(cache_dir)
-        for file in files:
-            with open(os.path.join(cache_dir, file)) as f:
-                state: OrderedDict = torch.load(f)
+        for _, _, files in os.walk(cache_dir):
+            if len(files) == 0:
+                return
+            for file in files:
+                with open(os.path.join(cache_dir, file), 'rb') as f:
+                    state: OrderedDict = torch.load(f)
 
-            for layer in state:
-                current_state[layer] = torch.add(current_state[layer], state[layer])
+                for layer in state:
+                    current_state[layer] = torch.add(current_state[layer], state[layer])
 
-        for layer in current_state:
-            current_state[layer] = torch.divide(current_state[layer], len(files))
+            for layer in current_state:
+                current_state[layer] = torch.divide(current_state[layer], len(files))
 
-        self.model.load_state_dict(current_state)
+            self.model.load_state_dict(current_state)
+            break
+        print("Model is updated")
 
-    def broadcast_model(self):
-        dir = os.path.join("temp", "checkpoints")
-        os.mkdirs(dir)
-        with open(os.path.join(dir, f"{self.current_epoch}"), "w") as f:
+    def __broadcast_model(self):
+        print("broadcast model to other peers.")
+        dir = os.path.join(settings.temp_dir, "checkpoints")
+        if not os.path.exists(dir):
+            os.makedirs(dir)
+        with open(os.path.join(dir, f"{self.current_epoch}"), "wb") as f:
             torch.save(self.model.state_dict(), f)
 
         with open(os.path.join(dir, f"{self.current_epoch}"), "rb") as f:
             for peer in self.bootstrap_peers:
-                httpx.post(f"{peer}/sync/{self.current_epoch}", files={"file": f})
+                print(f"Sending model state to {peer}")
+                response = httpx.post(f"{peer}/sync/{self.current_epoch}", files={"state": f})
+                print(f"Model has been sent to {peer}")
+        print("Finished broadcasting model.")
 
     def train(
-        self,
-        criterion,
-        optimizer,
-        train_loader: DataLoader,
-        epoch: int,
-        privacy_engine: PrivacyEngine,
-        device="cpu",
+            self
     ):
-        accs = []
-        losses = []
+        self.is_training = True
+        while self.current_epoch < self.max_epoch:
+            self.current_epoch += 1
 
-        for x, y in train_loader:
-            x = x.to(device)
-            y = y.to(device)
+            acc_array = []
+            losses = []
 
-            logits = self.model(x)
-            loss = criterion(logits, y)
-            loss.backward()
+            for x, y in self.train_loader:
+                x = x.to(self.device)
+                y = y.to(self.device)
 
-            optimizer.step()
-            optimizer.zero_grad()
+                logits = self.model(x)
+                loss = self.criterion(logits, y)
+                loss.backward()
 
-            preds = logits.argmax(-1)
-            n_correct = float(preds.eq(y).sum())
-            batch_accuracy = n_correct / len(y)
+                self.optimizer.step()
+                self.optimizer.zero_grad()
 
-            accs.append(batch_accuracy)
-            losses.append(float(loss))
+                preds = logits.argmax(-1)
+                n_correct = float(preds.eq(y).sum())
+                batch_accuracy = n_correct / len(y)
 
-        printstr = (
-            f"\t Epoch {epoch}. Accuracy: {mean(accs):.6f} | Loss: {mean(losses):.6f}"
-        )
+                acc_array.append(batch_accuracy)
+                losses.append(float(loss))
 
-        if privacy_engine:
-            epsilon = privacy_engine.get_epsilon(self.delta)
-            printstr += f" | (ε = {epsilon:.2f}, δ = {self.delta})"
+            log = f"Epoch {self.current_epoch}. Accuracy: {mean(acc_array):.6f} | Loss: {mean(losses):.6f}"
+            if self.privacy_engine:
+                epsilon = self.privacy_engine.get_epsilon(settings.delta)
+                log += f" | (ε = {epsilon:.2f}, δ = {settings.delta})"
+            print(log)
 
-        print(printstr)
+            if self.__should_update_state():
+                self.__broadcast_model()
+                print("Suspend training. Waiting for other peers' state.")
+                self.__wait_for_other_state()
+                self.update_model(os.path.join(settings.temp_dir, "states", str(self.current_epoch)))
+                print("Resume training.")
 
-        self.broadcast_model()
+        self.is_training = False
 
-        dir = os.path.join("temp", "states", epoch)
-        os.makedirs(dir)
-        _, _, files = os.walk(dir)
-        if len(files) == len(self.bootstrap_peers) and epoch == self.current_epoch:
-            self.update_model(dir)
+    def __wait_for_other_state(self):
+        while True:
+            if self.has_received_all_state():
+                break
+            time.sleep(1)
 
-    def test(self, test_loader, privacy_engine, device="cpu"):
-        accs = []
+    def __get_state_dir(self):
+        return os.path.join(settings.temp_dir, "states", str(self.current_epoch))
+
+    def __should_update_state(self) -> bool:
+        return self.current_epoch % self.sync_epoch == 0 and self.current_epoch != 0
+
+    def has_received_all_state(self) -> bool:
+        state_dir = self.__get_state_dir()
+        if not os.path.exists(state_dir):
+            os.makedirs(state_dir)
+        for (_, _, files) in os.walk(state_dir):
+            return len(files) == len(self.bootstrap_peers)
+
+    def test(self, test_loader):
+        acc_array = []
         with torch.no_grad():
             for x, y in test_loader:
-                x = x.to(device)
-                y = y.to(device)
+                x = x.to(self.device)
+                y = y.to(self.device)
 
                 preds = self.model(x).argmax(-1)
                 n_correct = float(preds.eq(y).sum())
                 batch_accuracy = n_correct / len(y)
 
-                accs.append(batch_accuracy)
+                acc_array.append(batch_accuracy)
         print_str = (
-            "\n----------------------------\n" f"Test Accuracy: {mean(accs):.6f}"
+            "\n----------------------------\n" f"Test Accuracy: {mean(acc_array):.6f}"
         )
-        if privacy_engine:
-            epsilon = privacy_engine.get_epsilon(self.delta)
-            print_str += f" (ε = {epsilon:.2f}, δ = {self.delta})"
+        if self.privacy_engine:
+            epsilon = self.privacy_engine.get_epsilon(settings.delta)
+            print_str += f" (ε = {epsilon:.2f}, δ = {settings.delta})"
         print(print_str + "\n----------------------------\n")

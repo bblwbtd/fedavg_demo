@@ -9,6 +9,7 @@ from config import settings
 
 VOCAB_SIZE = 256 + 3
 
+
 class CharByteEncoder(nn.Module):
 
     def __init__(self):
@@ -110,7 +111,6 @@ train_len = int(train_split * len(ds))
 test_len = len(ds) - train_len
 
 train_ds, test_ds = torch.utils.data.random_split(ds, [train_len, test_len])
-
 
 train_loader = DataLoader(
     train_ds,

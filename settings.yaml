@@ -18,4 +18,4 @@ max_per_sample_grad_norm: 1.5
 # Peer settings
 temp_dir: ./temp
 data_path: ./data/names
-bootstrap_peers: 
+bootstrap_peers: []

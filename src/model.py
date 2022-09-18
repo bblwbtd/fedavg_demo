@@ -2,7 +2,7 @@ import torch
 
 from torch import nn
 from config import settings
-from .data import ds, train_loader
+from src.data import ds, train_loader
 from opacus.layers import DPLSTM
 from opacus import PrivacyEngine
 
@@ -52,10 +52,9 @@ def init_name_classifier_model():
         settings.bidirectional_lstm,
     ).to(device)
 
-    criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.SGD(model.parameters(), lr=settings.learning_rate)
     privacy_engine = PrivacyEngine(secure_mode=settings.secure_mode)
-    model, optimizer, _ = privacy_engine.make_private_with_epsilon(
+    model, optimizer, data_loader = privacy_engine.make_private_with_epsilon(
         module=model,
         optimizer=optimizer,
         data_loader=train_loader,
@@ -65,4 +64,4 @@ def init_name_classifier_model():
         epochs=settings.epochs,
     )
 
-    return model
+    return model, optimizer, data_loader, privacy_engine
