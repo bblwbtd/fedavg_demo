@@ -117,6 +117,9 @@ class Peer:
                 print("Resume training.")
 
         self.is_training = False
+        model_path = os.path.join(settings.temp_dir, 'model.pt')
+        torch.save(self.model, model_path)
+        print(f"The training is finished. The model has been saved to {model_path}")
 
     def __wait_for_other_state(self):
         while True:

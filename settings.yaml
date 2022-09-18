@@ -16,6 +16,7 @@ epsilon: 12.0
 max_per_sample_grad_norm: 1.5
 
 # Peer settings
+port: 9998
 temp_dir: ./temp
 data_path: ./data/names
 bootstrap_peers: []
