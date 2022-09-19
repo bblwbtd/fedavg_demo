@@ -5,11 +5,12 @@ n_lstm_layers: 1
 bidirectional_lstm: False
 
 # Training settings
-epochs: 100
+max_epochs: 100
 learning_rate: 2.0
 sync_epochs: 10
 
 # Privacy engine settings
+enable_dp: False
 secure_mode: False
 delta: 0.00008
 epsilon: 12.0

@@ -10,6 +10,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from config import settings
+from src.data import test_loader
 
 
 class Peer:
@@ -22,8 +23,8 @@ class Peer:
             privacy_engine: PrivacyEngine,
             device="cpu",
             bootstrap_peers=None,
-            sync_epoch=10,
-            max_epoch=100,
+            sync_epoch=settings.sync_epochs,
+            max_epoch=settings.max_epochs,
     ) -> None:
         if bootstrap_peers is None:
             bootstrap_peers = []
@@ -121,6 +122,8 @@ class Peer:
         torch.save(self.model, model_path)
         print(f"The training is finished. The model has been saved to {model_path}")
 
+        self.test(data_loader=test_loader)
+
     def __wait_for_other_state(self):
         while True:
             if self.has_received_all_state():
@@ -140,10 +143,10 @@ class Peer:
         for (_, _, files) in os.walk(state_dir):
             return len(files) == len(self.bootstrap_peers)
 
-    def test(self, test_loader):
+    def test(self, data_loader: DataLoader):
         acc_array = []
         with torch.no_grad():
-            for x, y in test_loader:
+            for x, y in data_loader:
                 x = x.to(self.device)
                 y = y.to(self.device)
 

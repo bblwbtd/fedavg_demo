@@ -9,13 +9,13 @@ from opacus import PrivacyEngine
 
 class CharNNClassifier(nn.Module):
     def __init__(
-        self,
-        embedding_size,
-        hidden_size,
-        output_size,
-        num_lstm_layers=1,
-        bidirectional=False,
-        vocab_size=256 + 3,
+            self,
+            embedding_size,
+            hidden_size,
+            output_size,
+            num_lstm_layers=1,
+            bidirectional=False,
+            vocab_size=256 + 3,
     ):
         super().__init__()
 
@@ -43,6 +43,7 @@ class CharNNClassifier(nn.Module):
 
 
 def init_name_classifier_model():
+    data_loader = train_loader
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = CharNNClassifier(
         settings.embedding_size,
@@ -53,15 +54,18 @@ def init_name_classifier_model():
     ).to(device)
 
     optimizer = torch.optim.SGD(model.parameters(), lr=settings.learning_rate)
-    privacy_engine = PrivacyEngine(secure_mode=settings.secure_mode)
-    model, optimizer, data_loader = privacy_engine.make_private_with_epsilon(
-        module=model,
-        optimizer=optimizer,
-        data_loader=train_loader,
-        max_grad_norm=settings.max_per_sample_grad_norm,
-        target_delta=settings.delta,
-        target_epsilon=settings.epsilon,
-        epochs=settings.epochs,
-    )
+    privacy_engine = None
+
+    if settings.enable_dp == 'True':
+        privacy_engine = PrivacyEngine(secure_mode=settings.secure_mode)
+        model, optimizer, data_loader = privacy_engine.make_private_with_epsilon(
+            module=model,
+            optimizer=optimizer,
+            data_loader=train_loader,
+            max_grad_norm=settings.max_per_sample_grad_norm,
+            target_delta=settings.delta,
+            target_epsilon=settings.epsilon,
+            epochs=settings.max_epochs,
+        )
 
     return model, optimizer, data_loader, privacy_engine
